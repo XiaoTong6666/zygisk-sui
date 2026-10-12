@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/KernelSU-Modules/tools/main/schemas/module.schema.json
+schemaVersion: 1
+id: zygisk-sui
+name: Zygisk - Sui
+summary: Fork by XiaoTong. Modern super user interface implementation on Android.
+description: README.md
+license: GPL-3.0-or-later
+homepage: https://github.com/XiaoTong6666/Sui
+support: https://github.com/XiaoTong6666/Sui/issues
+tags: [android, root, shizuku, shizuku-api, sui, zygisk]
+metamodule: false
+authors:
+  - name: XiaoTong
+    url: https://github.com/XiaoTong6666
+  - name: RikkaW
+    url: https://github.com/RikkaW
+  - name: Sui Contributors
+    url: https://github.com/XiaoTong6666/Sui/graphs/contributors
+compatibility:
+  androidMinApi: 23
+release:
+  assetPattern: "Sui-*-release.zip"
