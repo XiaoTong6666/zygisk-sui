@@ -50,22 +50,31 @@ Sui の動作には対応した root 環境が必要です。Magisk の場合は
 - ホーム画面の **設定** アイコンを長押しすると Sui のショートカットが表示されます。  
 - Sui 管理画面で右上のメニューから **ショートカットをホーム画面に追加** を選択できます。  
 - デフォルトのダイヤラーアプリで `*#*#784784#*#*` と入力すると Sui が起動します。  
-- KernelSU / Magisk 管理アプリの **Action** ボタンからも Sui 管理画面を開くことができます。
+- 対応する root 管理アプリのモジュール **Action** ボタンからも Sui 管理画面を開くことができます。
 
 > **注** 一部の端末では設定アプリの長押しでショートカットが表示されない場合があります。  
 > また、ユーザーへの過度な干渉を防ぐため、最近のバージョンでは **開発者オプション** へ入った際に自動でショートカットを作成する機能は削除されています。
 
+現在は右上メニューが Sui の主要な設定入口でもあります。検索／フィルター、ショートカット、外観設定に加えて、次の設定を行えます。
+
+* **デフォルト値を変更** 明示的な UID 権限ルールを持たないアプリが継承する既定権限を設定します。Ask、root、shell、Deny、Hide を選択できます。
+* **旧式 Shizuku 互換** 古い Shizuku クライアントが使用する明示的な `REQUEST_BINDER` ブロードキャスト方式を必要に応じて互換対応します。Shizuku 本体がインストール済みの場合、この互換フックは要求を横取りせず、通常の Sui 権限ルーティングと Hide の動作もそのまま使用されます。
+* **Shell の昇格を禁止 (KSU)** 対応する KernelSU では、Sui の shell 子プロセスが UID 2000 に降格する前に no-escape 制限を設定し、Rish、shell モードの Shizuku API、UserService、およびその子孫プロセスが KernelSU 経由で再び root へ昇格するのを防ぎます。変更後は再起動が必要です。必要な UAPI を KernelSU がサポートしていない場合、shell バックエンドの起動を失敗させるのではなく、この設定を自動的に無効化します。
+* **ADB Root** **無効**、**次回起動時のみ有効**、**常に有効** の 3 モードを選択できます。変更後は再起動が必要です。
+
+これらの設定は Sui サービスが永続化します。一部のブート時機能は内部的には `/data/adb/sui/` 配下のマーカーファイルを使用しますが、通常はファイルを手動で作成・削除せず、管理 UI から変更してください。
+
 ### 権限モード
 
-Sui は UID ごとに権限状態を保持します。主なモードは次の通りです。
+Sui は UID ごとに明示的な権限状態を保持します。管理 UI でアプリをタップすると明示的なモードを選択できます。**Default** を選ぶと、その UID の明示ルールを削除し、右上メニューの **デフォルト値を変更** で設定したグローバル既定値を継承します。
 
-* **Ask / default** アプリは Sui に接続でき、通常のフローで権限要求が行われます。  
 * **Allow root** アプリは root バックエンドへルーティングされます。  
 * **Allow shell** アプリは shell バックエンドへルーティングされます。  
 * **Deny** アプリは Sui の利用が拒否されます。  
 * **Hide** 対象アプリから Sui が完全に隠蔽されます。`Hide` が有効になると、Native Binder の `execTransact` 段階で対象 UID の Sui Bridge トランザクションが遮断され、`BridgeService` へ到達しません。
+* **Default** その UID には明示的な権限を保存せず、現在のグローバル既定値を継承します。グローバル既定値が **Ask** の場合、アプリは Sui に接続し、通常のフローで権限を要求できます。
 
-権限状態が変わると、Sui は影響を受けたアプリを強制停止し、次回起動時に正しいバックエンドが取得されるようにします。
+権限状態が変わると、Sui は system_server と shell 側のルーティング状態を同期し、安全に移行できる対応クライアントでは Binder をそのまま切り替えます。すでに保持している高権限 capability の失効が必要な遷移や、ライブ Binder handoff に対応していない旧クライアントでは、古い高権限 Binder が残らないように対象アプリを強制停止または再起動する場合があります。
 
 ### インタラクティブシェル
 
@@ -77,29 +86,17 @@ Sui にはインタラクティブシェルが用意されています。
 
 ### adb root
 
-Sui はオプションで `adb root` をサポートしています。有効化すると、`adbd` 用のラッパーと preload フックが設定され、`adbd` が現在の root 実装の SELinux ドメインで動作しつつ、期待通りの `adbd` ソケットラベルが保たれます。
+Sui はオプションで `adb root` をサポートしています。ADB Root のサポート対象は **Android 11（API 30）以降の動的リンクされた APEX adbd** です。APEX の Bind Mount 方式にはバージョン付き APEX が必要です。従来の非 APEX 用互換コードは維持しますが、サポート対象外であり、root 実装のモジュールのマウントタイミングに依存します。この範囲は ADB Root のみに適用され、Sui 本体の対応 Android バージョンには影響しません。
 
-この機能はデフォルトで無効です。以下のマーカー ファイルを root シェルから作成し、再起動すると `post-fs-data` 段階で有効になります。
+有効化すると、APEX 用のラッパーと preload フック、またはオプションの ZN インジェクションを使用し、期待通りの `adbd` ソケットラベルを維持します。
 
-* **次回起動だけ有効にする**  
+この機能はデフォルトで無効です。Sui 管理 UI を開き、右上メニューから **ADB Root** を選び、次のいずれかを設定します。
 
-  ```sh
-  touch /data/adb/sui/enable_adb_root_once
-  ```
+* **無効** `adb root` サポートを無効のままにします。
+* **次回起動時のみ有効** 次の 1 回の起動だけ有効化します。この一時設定は Supervisor の準備処理で消費されるため、その起動後は管理 UI の表示が自動的に **無効** に戻ります。
+* **常に有効** **無効** に戻すまで、毎回の起動で有効化します。
 
-* **永続的に有効にする**  
-
-  ```sh
-  touch /data/adb/sui/enable_adb_root
-  ```
-
-再起動後は通常通り `adb root` が使用可能です。
-
-永続モードを無効にする場合は次のコマンドを実行します。
-
-```sh
-rm /data/adb/sui/enable_adb_root
-```
+モード変更後は端末を再起動してください。ADB Root が有効な状態で起動した後は、通常通り `adb root` を使用できます。
 
 > この機能は使用している root 実装や SELinux ポリシーに依存します。Sui は必要な `setcurrent`、`dyntransition`、`setsockcreate` 権限があるかを確認した上で有効化します。  
 > 既存アプリの動作は変更されません。影響するのはデバイス上の `adbd` パスだけです。  
@@ -219,29 +216,31 @@ debug ビルドでは再現せず、release ビルドでのみ発生する場合
 
 ### オプション機能が期待通り動かない
 
-- Sui のモジュールファイルや marker ファイルを変更した後は、一度端末を再起動してください。
+- **ADB Root** と **Shell の昇格を禁止 (KSU)** は Sui 管理 UI から設定し、ブート時設定を反映するために端末を一度再起動してください。
 - 必要に応じて KernelSU / APatch のログを書き出し、併せて [Sui のログ取得](#sui-のログ取得) を参照してください。
-- 必要に応じて `/data/adb/sui/` 配下の marker ファイルや生成ファイルが存在するかも確認してください。
+- `/data/adb/sui/` 配下の marker ファイルは実装詳細です。問題の切り分け時に確認することはありますが、通常は手動で編集する必要はありません。
 
 ## 内部構成
 
 Sui は [Zygisk](https://github.com/topjohnwu/zygisk-module-sample) に依存しています。Zygisk により `system_server`、`SystemUI`、`Settings`、および関連アプリプロセスへのインジェクションが可能になります。
 
-**全体で 5 つの主要パートと、オプションの `adb root` パス** が存在します。
+**全体で 5 つの主要パートに加え、`adb root` や KernelSU shell no-escape などのオプションのブート時パス** が存在します。
 
 * **Root プロセス**  
-  `post-fs-data` 段階で起動される root プロセスです。Java サーバーを起動し、Shizuku API とその他プライベート API を提供します。  
+  `service.sh` から Native Supervisor によって起動される root プロセスです。Java サーバーを起動し、Shizuku API とその他プライベート API を提供します。
   ルートサーバーは権限設定の中心で、UID の権限データベースを管理し、`system_server` に hidden / root allowed / shell allowed / denied / default mode の状態を同期します。
 
 * **Shell プロセス**  
   `shell` 権限で動作し、shell 権限が付与されたアプリにサービスを提供します。  
   ルートサーバーがミラーした設定ファイルから UID 権限を読み込み、権限確認ウィンドウが必要な場合はルートサーバーへ委譲し、SystemUI の確認 UI を起動させます。
+  **Shell の昇格を禁止 (KSU)** が有効な場合、native launcher は shell 子プロセスを UID 2000 に降格する前に、対応する KernelSU driver へ `DISABLE_ESCAPE_TO_ROOT` の適用を要求します。この制限は子孫プロセスにも継承されます。KernelSU が対応 UAPI をサポートしていない場合、設定を解除して shell バックエンドの起動自体は継続します。
 
 * **SystemServer インジェクト**  
   * `Binder#execTransact` をフックし、Sui が利用する専用 Binder トランザクションを `system_server` 内で捕捉。  
   * hidden / root allowed / shell allowed / denied / default mode 各種権限キャッシュを保持。  
   * UID の有効権限に応じて返す Binder を選択：root → root バインダー、shell → shell バインダー。  
   * hidden UID は Sui Bridge リクエストを直接遮断し、ask / deny の場合は root バインダーを返して通常フローへ遷移させます。
+  * **旧式 Shizuku 互換** が有効な場合、古い Shizuku の明示的な `REQUEST_BINDER` ブロードキャストも認識し、呼び出し元の callback Binder を通して同じ権限ルーティング済み Sui Binder を返します。
 
 * **SystemUI インジェクト**  
   * Sui サービスから APK のファイルディスクリプタを取得し、`Resources` と権限ダイアログクラスをロード。  
@@ -255,7 +254,7 @@ Sui は [Zygisk](https://github.com/topjohnwu/zygisk-module-sample) に依存し
   * 対象 `Activity` の `Intent` に Sui の extra と token が含まれている場合、`SuiActivity` をインスタンス化して表示。
 
 * **adbd wrapper / preload（オプション）**  
-  * `adb root` が有効な場合、`post-fs-data` で `/apex/com.android.adbd/bin/adbd` または `/system/bin/adbd` 用のラッパーと preload ライブラリを準備。  
+  * `adb root` の Bind Mount 方式が有効な場合、Native Supervisor がサービス起動時に動的リンクされた `/apex/com.android.adbd/bin/adbd` 用のラッパーと preload ライブラリを準備します。従来の非 APEX 用互換コードは維持しますが、サポート対象外です。
   * ラッパーは `--root_seclabel=…` を現在の root 実装に対応した SELinux ドメインに書き換え、`LD_PRELOAD` を注入。  
   * preload フックは `selinux_android_setcon()`／`setcon()` を捕捉し、`adbd` が root ドメインに切り替わりつつ `sockcreate` ラベルは期待通りの `adbd` ラベルに復元されます。
 
